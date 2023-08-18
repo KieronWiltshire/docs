@@ -1,0 +1,515 @@
+---
+title: "Observability"
+date: 2022-08-03T18:53:31+02:00
+draft: false
+weight: 21
+menu:
+  docs:
+    weight: 30
+    identifier: observability_and_operations
+    parent: "Operations"
+---
+
+Hemdall implements different observability mechanisms to support easier operation and integration in different APM products. The following sections provide insights about what can be expected.
+
+== Logging in Heimdall
+
+Heimdall's implementation uses https://github.com/rs/zerolog[zerolog] - Zero Allocation JSON Logger, which can however also log in plain text. All emitted log statements include information related to distributed tracing (if tracing is enabled) so that not only log statements can be correlated to traces, but also all log statements belonging to single request/transaction can be correlated as well.
+
+Available Logging configuration options are described in link:{{< relref "/docs/configuration/observability/logging.adoc" >}}[Logging Configuration].
+
+=== Regular Log Events
+
+If you configure heimdall to log in `text` format, you can expect output similar to the one shown below:
+
+[source, log]
+----
+2022-08-03T12:51:48+02:00 INF Opentelemetry tracing initialized.
+2022-08-03T12:51:48+02:00 INF Instantiating in memory cache
+2022-08-03T12:51:48+02:00 DBG Creating rule set event queue.
+2022-08-03T12:51:48+02:00 INF Loading pipeline definitions
+2022-08-03T12:51:48+02:00 DBG Loading definitions for authenticators
+2022-08-03T12:51:48+02:00 DBG Loading pipeline definition id=noop_authenticator type=noop
+2022-08-03T12:51:48+02:00 DBG Loading pipeline definition id=anonymous_authenticator type=anonymous
+...
+2022-08-03T12:51:52+02:00 DBG Decision endpoint called
+2022-08-03T12:51:52+02:00 DBG Executing default rule
+2022-08-03T12:51:52+02:00 DBG Authenticating using anonymous authenticator
+2022-08-03T12:51:52+02:00 DBG Mutating using JWT unifier
+2022-08-03T12:51:52+02:00 DBG Generating new JWT
+2022-08-03T12:51:52+02:00 DBG Finalizing request
+----
+
+WARNING: Usage of this format is not recommended for production deployments as it requires more computational resources and is hence slow.
+
+Otherwise, if you configure it to use `gelf` (see https://docs.graylog.org/v1/docs/gelf[GELF] for format details) format, the output will look as follows:
+
+[source, json]
+----
+{"_level_name": "INFO", "version":"1.1", "host": "unknown", "timestamp": 1659523288,
+ "level": 6, "short_message": "Opentracing tracer initialized."}
+{"_level_name": "INFO", "version": "1.1", "host": "unknown", "timestamp": 1659523288,
+ "level": 6, "short_message": "Instantiating in memory cache"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523288,
+ "level": 7, "short_message": "Creating rule set event queue."}
+{"_level_name": "INFO", "version": "1.1", "host": "unknown", "timestamp": 1659523288,
+ "level": 6, "short_message": "Loading pipeline definitions"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523288,
+ "level": 7,"short_message": "Loading definitions for authenticators"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "id": "noop_authenticator",
+ "type": "noop","timestamp": 1659523288,
+ "level": 7, "short_message": "Loading pipeline definition"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "id": "anonymous_authenticator",
+ "type": "anonymous","timestamp": 1659523288,
+ "level": 7, "short_message": "Loading pipeline definition"}
+
+...
+
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Decision endpoint called"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp":1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Executing default rule"}
+{"_level_name": "DEBUG", "version":"1.1", "host": "unknown", "timestamp":1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Authenticating using anonymous authenticator"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Mutating using JWT unifier"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Generating new JWT"}
+{"_level_name": "DEBUG", "version": "1.1", "host": "unknown", "timestamp": 1659523295,
+ "level": 7, "_parent_id": "3449bda63ed70206", "_span_id": "f57c007257fee0ed",
+ "_trace_id": "00000000000000000a5af97bffe6a8a2", "short_message": "Finalizing request"}
+----
+
+Each log statement does also include the following fields in both log formats for incoming requests if tracing is enabled:
+
+* `_trace_id` - The trace id as defined by OpenTelemetry.
+* `_span_id` - The span id as defined by OpenTelemetry of the current transaction.
+* `_parent_id` - The span id of the callee, which started the given transaction. Only present if the callee set the corresponding tracing header.
+
+=== Access Log Events
+
+In addition to regular logs, heimdall emits access logs. These events are always emitted regardless the configured log level and the log level of these events in the log output is always `INFO`.
+
+Each request to any of heimdall's endpoints will result in two access events:
+
+* event describing the start of the transaction, and an
+* event describing the finalization of the transaction.
+
+Following are the fields, which are always set for both events:
+
+* `_tx_start` - Timestamp in Unix epoch format, when the transaction started.
+* `_client_ip` - The IP of the client of the request.
+
+If the event has been emitted for an HTTP request, following fields are set as well:
+
+* `_http_method` - The HTTP method used by the client while calling heimdall's endpoint.
+* `_http_path` - The used HTTP path.
+* `_http_user_agent` - The agent used by the client. The value is taken from the HTTP "User-Agent" header.
+* `_http_host` - The host part of the URI, the client is using while communicating with Heimdall.
+* `_http_scheme` - The scheme part of the URI, the client is using while communicating with Heimdall.
+
+If the event has been emitted for a GRPC request, following fields are set:
+
+* `_grpc_method` - The full GRPC method used.
+
+If the request comes from an intermediary, like e.g. an API Gateway and heimdall is configured to trust that "proxy" (see link:{{< relref "/docs/configuration/services/decision.adoc#_trusted_proxies" >}}[`trusted_proxies` configuration] of the Decision service, as well as the link:{{< relref "/docs/configuration/services/proxy.adoc#_trusted_proxies" >}}[`trusted_proxies` configuration] of the Proxy service), then following fields will be part of the events as well if the corresponding HTTP headers were sent.
+
+* `_http_x_forwarded_proto` - The value of the "X-Forwarded-Proto" header.
+* `_http_x_forwarded_host` - The value of the "X-Forwarded-Host" header.
+* `_http_x_forwarded_path` - The value of the "X-Forwarded-Path" header.
+* `_http_x_forwarded_uri` - The value of the "X-Forwarded-Uri" header.
+* `_http_x_forwarded_for` - The value of the "X-Forwarded-For" header.
+* `_http_forwarded` - The value of the "Forwarded" header.
+
+Following are the fields, which are set in the transaction finalization event in addition:
+
+* `_body_bytes_sent` - The length of the response body.
+* `_tx_duration_ms` - The duration of the transaction in milliseconds. If heimdall is operated in proxy mode, it will also include the time used to communicate with the upstream service.
+* `_access_granted` - Set either to `true` or `false`, indicating whether heimdall granted access or not.
+* `_subject` - The subject identifier if the access was granted.
+* `_error` - The information about an error, which e.g. led to the denial of the request.
+
+If the finalization event has been emitted for an HTTP request, following fields are set as well:
+
+* `_http_status_code` - The numeric HTTP response status code
+
+If the finalization event has been emitted for a GRPC request, following fields are set:
+
+* `_grpc_status_code` - The numeric GRPC status code.
+
+Following are the fields, which are set if tracing is enabled:
+
+* `_trace_id` - The trace id as defined by OpenTelemetry.
+* `_span_id` - The span id as defined by OpenTelemetry of the current transaction.
+* `_parent_id` - The span id of the callee, which started the given transaction. Only present if the callee set the corresponding tracing header.
+
+If you configure heimdall to log in `text` format, you can expect output as shown below:
+
+[source, text]
+----
+2022-08-03T12:40:16+02:00 INF TX started _client_ip=127.0.0.1 _http_host=127.0.0.1:4468 _http_method=GET
+ _http_path=/foo _http_scheme=http _http_user_agent=curl/7.74.0 _parent_id=3449bda63ed70206
+ _span_id=f57c007257fee0ed _trace_id=00000000000000000a5af97bffe6a8a2 _tx_start=1659523216
+
+....
+
+2022-08-03T12:40:16+02:00 INF TX finished _access_granted=true _body_bytes_sent=0 _client_ip=127.0.0.1
+ _http_host=127.0.0.1:4468 _http_method=GET _http_path=/foo _http_scheme=http _http_status_code=202
+ _http_user_agent=curl/7.74.0 _subject=anonymous _parent_id=3449bda63ed70206 _span_id=f57c007257fee0ed
+ _trace_id=00000000000000000a5af97bffe6a8a2 _tx_duration_ms=0 _tx_start=1659523216
+----
+
+Otherwise, if you configure it to use `gelf` format, the output will look as follows:
+
+[source, json]
+----
+{"_level_name": "INFO", "version":"1.1", "host":"unknown", "_tx_start":1659523295,
+ "_client_ip": "127.0.0.1", "_http_method": "GET", "_http_path":"/foo",
+ "_http_user_agent": "curl/7.74.0", "_http_host": "127.0.0.1:4468", "_http_scheme": "http",
+ "timestamp": 1659523295, "level": 6, "_parent_id": "3449bda63ed70206",
+ "_span_id": "f57c007257fee0ed", "_trace_id": "00000000000000000a5af97bffe6a8a2",
+ "short_message": "TX started"}
+
+....
+
+{"_level_name": "INFO", "version": "1.1", "host": "unknown", "_tx_start": 1659523295,
+ "_client_ip": "127.0.0.1", "_http_method": "GET", "_http_path": "/foo",
+ "_http_user_agent": "curl/7.74.0", "_http_host": "127.0.0.1:4468", "_http_scheme": "http",
+ "_body_bytes_sent": 0, "_http_status_code":200, "_tx_duration_ms":0, "_subject": "anonymous",
+ "_access_granted": true, "timestamp":1659523295, "level": 6, "_parent_id": "3449bda63ed70206",
+ "_span_id": "f57c007257fee0ed", "_trace_id": "00000000000000000a5af97bffe6a8a2",
+ "short_message": "TX finished"}
+----
+
+== Tracing in Heimdall
+
+Heimdall makes use of https://opentelemetry.io/[OpenTelemetry] for distributed tracing to support recording of paths taken by requests and supports all environment variables including the defined values according to https://opentelemetry.io/docs/reference/specification/sdk-environment-variables/[OpenTelemetry Environment Variable Specification]. In addition to these environment variables, heimdall defines its own tracing options, which are described in link:{{< relref "/docs/configuration/observability/tracing.adoc" >}}[Tracing Configuration] and can be used to tune the behaviour.
+
+NOTE: Tracing is enabled by default.
+
+On one hand, this chapter serves the purpose of a quick introduction to distributed tracing with heimdall and on the other hand to list the options that go beyond the standard OTEL definitions.
+
+=== Tracing Context Propagation
+
+When a request arrives at heimdall, it will create a trace context object based on the received headers, which according to OTEL are the `traceparent` and `tracestate` HTTP headers, defined in https://www.w3.org/TR/trace-context/[W3C Trace Context] as well as `baggage` HTTP header, defined in https://www.w3.org/TR/baggage/[W3C Baggage]. The creation of that context, as well as the transformation of it into new HTTP headers, set by heimdall while communicating with further services is named propagation and the components responsible for the creation of such context object are named propagators.
+
+Since not every service in a multi-service system may set or understand the above OTEL specific HTTP headers (as these might still be using tracing vendor specific headers), interoperability can be achieved by configuring the required propagators by making use of the `OTEL_PROPAGATORS` environment variable. OTEL defines the following values for this variable:
+
+* `tracecontext` - https://www.w3.org/TR/trace-context/[W3C Trace Context] propagator. Enabled by default, if `OTEL_PROPAGATORS` is not set.
+* `baggage` - https://www.w3.org/TR/baggage/[W3C Baggage] propagator. Enabled by default if `OTEL_PROPAGATORS` is not set.
+* `b3` - https://github.com/openzipkin/b3-propagation#single-header[Zipkin B3 Single Header] propagator.
+* `b3multi` - https://github.com/openzipkin/b3-propagation#multiple-headers[Zipkin B3 Multiple Header] propagator.
+* `jaeger` - https://www.jaegertracing.io/docs/1.38/client-libraries/#propagation-format[Jaeger Header] propagator.
+* `xray` - https://docs.aws.amazon.com/xray/latest/devguide/xray-concepts.html#xray-concepts-tracingheader[AWS X-Ray Header] propagator.
+* `ottrace` - https://github.com/opentracing?q=basic&type=&language=[OT Trace Header] propagator.
+* `none` - No automatically configured propagator.
+
+All of these are supported by heimdall. In addition, following propagators can be configured as well:
+
+* `datadog` - https://www.datadoghq.com/product/apm/[Datadog APM Trace Header] propagator.footnote:[Datadog supports the OTLP protokoll. For that reason, there is no exporter available.]
+
+Configured propagators are used for inbound, as well as for outbound traffic.
+
+=== Span Exporters
+
+Span Exporter handle the delivery of spans to external receivers (collectors, or agents). This is the final component in the trace export pipeline and typically provided by the APM vendor, like Jaeger, Zipkin, Instana, etc. Since not every multi-service system may have an up to day telemetry receiver supporting protocols defined by OTEL, interoperability can be achieved by configuring the required exporters by making use of the `OTEL_TRACES_EXPORTER` environment variable. OTEL defines the following values for this variable:
+
+* `otlp` - https://opentelemetry.io/docs/reference/specification/protocol/otlp/[OTLP] exporter. Enabled by default if `OTEL_TRACES_EXPORTER` is not set.
+* `jaeger` - https://github.com/jaegertracing/jaeger-idl/blob/main/thrift/jaeger.thrift[Jaeger Thrift] exporter to export spans in Jaeger data model.
+* `zipkin` - https://zipkin.io/zipkin-api/[Zipkin] exporter to export spans in Zipkin data model.
+* `none` - No automatically configured exporter for traces.
+
+All of these are supported by heimdall. In addition, following exporters can be configured as well:
+
+* `instana` - https://www.instana.com/[Instana] exporter to export spans in Instana data model.footnote:[Instana supports the W3C header used by OTEL. For that reason, there is no propagator available.]
+
+=== Example Configuration
+
+The environment variables set below configure heimdall to use Jaeger propagator and to export the spans via OTLP over grpc to the collector available under `\http://collector:4317`.
+
+[source,text]
+----
+OTEL_PROPAGATORS=jaeger
+OTEL_TRACES_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://collector:4317
+----
+
+If your environment supports OpenTelemetry and usage of defaults is ok, most probably, the only required environment variable to be set might be the `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
+
+== Metrics in Heimdall
+
+By default, heimdall exposes https://grafana.com/oss/prometheus/[Prometheus] style metrics on the `127.0.0.1:10250/metrics` HTTP endpoint (See also link:{{< relref "/docs/configuration/observability/metrics.adoc" >}}[Metrics Configuration]) which comprise the following information:
+
+* Process information, like CPU, memory, file descriptor usage and start time
+* Go runtime information, including details about GC, number of goroutines and OS threats
+* Information about the metrics endpoint itself, including the number of internal errors encountered while gathering the metrics, number of current inflight and overall scrapes done.
+* Information about the decision and proxy requests handled, including the total amount and duration of http requests by status code, method and path, as well as information about requests in progress.
+* Information about expiry for configured certificates.
+
+The following table provide detailed information about these
+
+[cols="2,1,5"]
+|===
+| Metric | Type | Description
+
+3+| _Process Information_
+
+| `process_cpu_seconds_total`
+| Counter
+| Total user and system CPU time spent in seconds.
+
+| `process_max_fds`
+| Gauge
+| Maximum number of open file descriptors.
+
+| `process_open_fds`
+| Gauge
+| Number of open file descriptors.
+
+| `process_resident_memory_bytes`
+| Gauge
+| Resident memory size in bytes.
+
+| `process_start_time_seconds`
+| Gauge
+| Start time of the process since unix epoch in seconds.
+
+| `process_virtual_memory_bytes`
+| Gauge
+| Virtual memory size in bytes.
+
+| `process_virtual_memory_max_bytes`
+| Gauge
+| Maximum amount of virtual memory available in bytes.
+
+3+| _Go Runtime Information_
+
+| `go_cgo_go_to_c_calls_calls_total`
+| Counter
+| Count of calls made from Go to C by the current process.
+
+| `go_gc_cycles_automatic_gc_cycles_total`
+| Counter
+| Count of completed GC cycles generated by the Go runtime.
+
+| `go_gc_cycles_forced_gc_cycles_total`
+| Counter
+| Count of completed GC cycles forced by the application.
+
+| `go_gc_cycles_total_gc_cycles_total`
+| Counter
+| Count of all completed GC cycles.
+
+| `go_gc_duration_seconds`
+| Summary
+| A summary of the pause duration of garbage collection cycles.
+
+| `go_gc_heap_allocs_by_size_bytes`
+| Histogram
+| Distribution of heap allocations by approximate size. Note that this does not include tiny objects as defined by /gc/heap/tiny/allocs:objects, only tiny blocks.
+
+| `go_gc_heap_allocs_bytes_total`
+| Counter
+| Cumulative sum of memory allocated to the heap by the application.
+
+| `go_gc_heap_allocs_objects_total`
+| Counter
+| Cumulative count of heap allocations triggered by the application. Note that this does not include tiny objects as defined by /gc/heap/tiny/allocs:objects, only tiny blocks.
+
+| `go_gc_heap_frees_by_size_bytes`
+| Histogram
+| istribution of freed heap allocations by approximate size. Note that this does not include tiny objects as defined by /gc/heap/tiny/allocs:objects, only tiny blocks.
+
+| `go_gc_heap_frees_bytes_total`
+| Counter
+| Cumulative sum of heap memory freed by the garbage collector.
+
+| `go_gc_heap_frees_objects_total`
+| Counter
+| Cumulative count of heap allocations whose storage was freed by the garbage collector. Note that this does not include tiny objects as defined by /gc/heap/tiny/allocs:objects, only tiny blocks.
+
+| `go_gc_heap_goal_bytes`
+| Gauge
+| Heap size target for the end of the GC cycle.
+
+| `go_gc_heap_objects_objects`
+| Gauge
+| Number of objects, live or unswept, occupying heap memory.
+
+| `go_gc_heap_tiny_allocs_objects_total`
+| Counter
+| Count of small allocations that are packed together into blocks. These allocations are counted separately from other allocations because each individual allocation is not tracked by the runtime, only their block. Each block is already accounted for in allocs-by-size and frees-by-size.
+
+| `go_gc_limiter_last_enabled_gc_cycle`
+| Gauge
+| GC cycle the last time the GC CPU limiter was enabled. This metric is useful for diagnosing the root cause of an out-of-memory error, because the limiter trades memory for CPU time when the GC's CPU time gets too high. This is most likely to occur with use of SetMemoryLimit. The first GC cycle is cycle 1, so a value of 0 indicates that it was never enabled.
+
+| `go_gc_pauses_seconds`
+| Histogram
+| Distribution individual GC-related stop-the-world pause latencies.
+
+| `go_gc_stack_starting_size_bytes`
+| Gauge
+| The stack size of new goroutines.
+
+| `go_goroutines`
+| Gauge
+| Number of goroutines that currently exist.
+
+| `go_info`
+| Gauge
+| Information about the Go environment.
+
+| `go_memory_classes_heap_free_bytes`
+| Gauge
+| Memory that is completely free and eligible to be returned to the underlying system, but has not been. This metric is the runtime's estimate of free address space that is backed by physical memory.
+
+| `go_memory_classes_heap_objects_bytes`
+| Gauge
+| Memory occupied by live objects and dead objects that have not yet been marked free by the garbage collector.
+
+| `go_memory_classes_heap_released_bytes`
+| Gauge
+| Memory that is completely free and has been returned to the underlying system. This metric is the runtime's estimate of free address space that is still mapped into the process, but is not backed by physical memory.
+
+| `go_memory_classes_heap_stacks_bytes`
+| Gauge
+| Memory allocated from the heap that is reserved for stack space, whether or not it is currently in-use.
+
+| `go_memory_classes_heap_stacks_bytes`
+| Gauge
+| Memory allocated from the heap that is reserved for stack space, whether or not it is currently in-use.
+
+| `go_memory_classes_heap_unused_bytes`
+| Gauge
+| Memory that is reserved for heap objects but is not currently used to hold heap objects.
+
+| `go_memory_classes_metadata_mcache_free_bytes`
+| Gauge
+| Memory that is reserved for runtime mcache structures, but not in-use.
+
+| `go_memory_classes_metadata_mcache_inuse_bytes`
+| Gauge
+| Memory that is occupied by runtime mcache structures that are currently being used.
+
+| `go_memory_classes_metadata_mspan_free_bytes`
+| Gauge
+| Memory that is reserved for runtime mspan structures, but not in-use.
+
+| `go_memory_classes_metadata_mspan_inuse_bytes`
+| Gauge
+| Memory that is occupied by runtime mspan structures that are currently being used.
+
+| `go_memory_classes_metadata_other_bytes`
+| Gauge
+| Memory that is reserved for or used to hold runtime metadata.
+
+| `go_memory_classes_os_stacks_bytes`
+| Gauge
+| Stack memory allocated by the underlying operating system.
+
+| `go_memory_classes_other_bytes`
+| Gauge
+| Memory used by execution trace buffers, structures for debugging the runtime, finalizer and profiler specials, and more.
+
+| `go_memory_classes_profiling_buckets_bytes`
+| Gauge
+| Memory that is used by the stack trace hash map used for profiling.
+
+| `go_memory_classes_total_bytes`
+| Gauge
+| All memory mapped by the Go runtime into the current process as read-write. Note that this does not include memory mapped by code called via cgo or via the syscall package. Sum of all metrics in /memory/classes.
+
+| `go_memstats_last_gc_time_seconds`
+| Gauge
+| Number of seconds since 1970 of last garbage collection.
+
+| `go_sched_gomaxprocs_threads`
+| Gauge
+| The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously.
+
+| `go_sched_goroutines_goroutines`
+| Gauge
+| Count of live goroutines.
+
+| `go_sched_latencies_seconds`
+| Histogram
+| Distribution of the time goroutines have spent in the scheduler in a runnable state before actually running.
+
+| `go_threads`
+| Gauge
+| Number of OS threads created.
+
+3+| _Decision / Proxy / Management Service request related_
+
+| `http_request_duration_seconds`
+| Histogram
+| Duration of all HTTP requests by service (decision, proxy, management), status code, method and path.
+
+| `http_requests_in_progress_total`
+| Gauge
+| All the requests in progress by service (decision, proxy, management) and method
+
+| `http_requests_total`
+| Counter
+| Count all http requests by service (decision, proxy, management), status code, method and path.
+
+| `grpc_request_duration_seconds`
+| Histogram
+| Duration of all requests by tunneled HTTP status code, service (decision) and method, as well as by GRPC method and status code.
+
+| `grpc_requests_in_progress_total`
+| Gauge
+| All the requests in progress by service (decision), tunneled HTTP method, as well as by GRPC method.
+
+| `grpc_requests_total`
+| Counter
+| Count all requests by service (decision), tunneled HTTP status code, service and method, as well as by GRPC method and status code.
+
+3+| _Certificate expiry information_
+
+| `certificate_expiry_seconds`
+| Gauge
+| Number of seconds until a certificate used by a particular service (decision, proxy, management), as well as signer expires. Contains certificate identification information as well.
+
+3+| _Metrics endpoint statistics_
+
+| `promhttp_metric_handler_requests_in_flight`
+| Gauge
+| Current number of scrapes being served.
+
+| `promhttp_metric_handler_requests_total`
+| Counter
+| Total number of scrapes by HTTP status code.
+
+| `promhttp_metric_handler_errors_total`
+| Counter
+| Total number of internal errors encountered by the promhttp metric handler.
+
+|===
+
+NOTE: More details about Prometheus metric types can be found https://prometheus.io/docs/concepts/metric_types/[here].
+
+== Runtime Profiling in Heimdall
+
+If enabled, heimdall exposes a `/debug/pprof` HTTP endpoint on port `10251` (See also link:{{< relref "/docs/configuration/observability/profiling.adoc" >}}[Runtime Profiling Configuration]) on which runtime profiling data in the `profile.proto` format (also known as `pprof` format) can be consumed by APM tools, like https://github.com/google/pprof[Google's pprof], https://grafana.com/oss/phlare/[Grafana Phlare], https://pyroscope.io/[Pyroscope] and many more for visualization purposes. Following information is available:
+
+
+* `allocs` - A sampling of all past memory allocations.
+* `block` - Stack traces that led to blocking on synchronization primitives.
+* `cmdline` - The command line invocation of the current program, with arguments separated by NUL bytes.
+* `goroutine` - Stack traces of all current goroutines.
+* `heap` - A sampling of memory allocations of live objects.
+* `mutex` - Stack traces of holders of contended mutexes.
+* `profile` - Cpu profile. Profiling lasts for duration specified in `seconds` parameter, or for 30 seconds if not specified
+* `symbol` - Looks up the program counters listed in the request, responding with a table mapping program counters to function names.
+* `threadcreate` - Stack traces that led to the creation of new OS threads.
+* `trace` - Execution trace in binary form. Tracing lasts for duration specified in `seconds` parameter, or for 1 second if not specified.
+
+See also the link:{{< relref "/openapi/_index.adoc#tag/Profiling" >}}[API] documentation for the documentation of the actual API.

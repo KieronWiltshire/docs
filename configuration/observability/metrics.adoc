@@ -1,0 +1,70 @@
+---
+title: "Metrics"
+date: 2022-06-09T22:16:45+02:00
+draft: false
+weight: 55
+menu:
+  docs:
+    weight: 20
+    parent: "Observability"
+---
+
+Heimdall exposes https://grafana.com/oss/prometheus/[Prometheus] style metrics on `127.0.0.1:10250/metrics` endpoint for analysis and visualization purposes.
+
+== Configuration
+
+Configuration for this service can be adjusted in the `metrics` property of heimdall's configuration by making use of the following properties.
+
+* *`enabled`*: _boolean_ (optional)
++
+By making use of this property, you can configure heimdall to enable or disable the metrics service. Defaults to `true` (metrics exposure is enabled).
++
+.Disabling metrics.
+====
+[source, yaml]
+----
+metrics:
+  enabled: false
+----
+====
+
+* *`host`*: _string_ (optional)
++
+By making use of this property, you can specify the TCP/IP address on which heimdall should listen for connections from client applications. The entry `0.0.0.0` allows listening for all IPv4 addresses. Defaults to `127.0.0.1` - the loopback interface to avoid unwanted exposure of metrics.
++
+NOTE: If you operate heimdall in a container, you should set this property to a value, which would allow your APM system to scrape this information.
++
+.Configure heimdall to allow listening on any TCP/IP interfaces.
+====
+[source, yaml]
+----
+metrics:
+  host: 0.0.0.0
+----
+====
+
+* *`port`*: _integer_ (optional)
++
+By making use of this property, you can specify the TCP port the heimdall should listen on. Defaults to `10250`.
++
+.Configure heimdall to listen on port `9999` for metrics requests.
+====
+[source, yaml]
+----
+metrics:
+  port: 9999
+----
+====
+
+* *`metrics_path`*: _string_ (optional)
++
+By making use of this property, you can specify the path under which prometheus metrics information is made available. Defaults to `/metrics`.
++
+.Configure heimdall expose metrics information behind `/prometheus` path.
+====
+[source, yaml]
+----
+metrics:
+  metrics_path: /prometheus
+----
+====
